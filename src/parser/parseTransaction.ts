@@ -5,10 +5,10 @@ const DESCRIPTION_END = ']';
 
 export const parseDescription = (description: string) => description.slice(1).slice(0, -1);
 
-export const parseTransaction = (action: string): Transaction => {
+export const parseTransaction = (action: string): Omit<Transaction, 'createdAt'> => {
   const [amount, currency, tag, ...rest] = action.split(' ');
 
-  let expensesObject: Transaction = { amount: +amount, currency, tag };
+  let expensesObject: Omit<Transaction, 'createdAt'> = { amount: +amount, currency, tag };
 
   let description = '';
 

@@ -2,6 +2,8 @@ import { Telegraf, Markup } from 'telegraf';
 import firebase from 'firebase';
 import { v4 as uuid } from 'uuid';
 import { parseTransaction } from './parser/parseTransaction';
+import { Transaction } from './types';
+import { getStats } from './stats/getStats';
 
 require('dotenv').config();
 
@@ -32,6 +34,7 @@ const startBot = (token: string) => {
       id: uuid(),
       username: message.from.username,
       ...action,
+      createdAt: new Date(),
     });
 
     const transactionType = amount > 0 ? 'income' : 'expenses';
@@ -73,21 +76,66 @@ const startBot = (token: string) => {
   });
 
   bot.command('/transactions', async (ctx) => {
-    const {
-      update: { message },
-    } = ctx;
+    const username = ctx.update.message.from.username;
 
-    const documentData = await db.collection('transaction').get();
+    if (username) {
+      const documentData = await db
+        .collection('transaction')
+        .where('username', '==', username)
+        .get();
 
-    const transactions = documentData.docs.map((doc, index) => {
-      const { tag, description, amount, currency } = doc.data();
+      const transactions = documentData.docs.map((doc, index) => {
+        const { tag, description, amount, currency } = doc.data() as Transaction;
 
-      return `${index + 1}) ${amount} ${currency} ${tag} ${
-        description ? `(${description})` : ''
-      } | Delete ▶ /del${doc.id}`;
-    });
+        return `${index + 1}) ${amount} ${currency} ${tag} ${
+          description ? `(${description})` : ''
+        } | Delete ▶ /del${doc.id}`;
+      });
 
-    ctx.reply(transactions.join('\n'));
+      if (transactions.length) {
+        return ctx.reply(transactions.join('\n'));
+      }
+
+      return ctx.reply(`You don't have added transactions!`);
+    }
+  });
+
+  bot.command('stats', async (ctx) => {
+    const { from, text } = ctx.update.message;
+    const username = from.username;
+    const [, start, end] = text.split(' ');
+
+    let documentData: firebase.firestore.QuerySnapshot<firebase.firestore.DocumentData> | null = null;
+
+    if (start || end) {
+      const startDate = Date.parse(start);
+      const endDate = Date.parse(end);
+
+      if (startDate && endDate) {
+        documentData = await db
+          .collection('transaction')
+          .where('createdAt', '>=', new Date(startDate))
+          .where('createdAt', '<=', new Date(endDate))
+          .get();
+      } else {
+        documentData = await db
+          .collection('transaction')
+          .where('createdAt', '>=', new Date(startDate))
+          .get();
+      }
+    } else {
+      documentData = await db.collection('transaction').where('username', '==', username).get();
+    }
+
+    const transactions = documentData.docs.map((doc) => doc.data() as Transaction);
+
+    const stats = getStats(transactions);
+    const statsByCategory = Object.entries(stats.transactions)
+      .map(([category, stat]) => `${category}: \n↑ ${stat.totalIncome}\n↓ ${stat.totalExpenses}\n`)
+      .join('\n');
+
+    return ctx.reply(`${statsByCategory}\n\n↑ Income: ${stats.income}\n↓ Expenses: ${stats.expenses}
+    `);
   });
 
   bot.launch();
